@@ -1,0 +1,25 @@
+name: latent-nerf  # Change the name if needed
+channels:
+  - conda-forge
+  - defaults
+  - nvidia
+dependencies:
+  - python=3.9
+  - pip
+  - cudatoolkit=11.3  # CUDA 11.3 (commonly used in 2022)
+  - cudnn=8.2  # cuDNN version from 2022
+  - pip:
+      - torch==1.12.1  # Last version of PyTorch before 2023
+      - torchvision==0.13.1  # Compatible with PyTorch 1.12.1
+      - transformers==4.20.1  # Stable version from mid-2022
+      - diffusers==0.3.0  # Version from 2022
+      - accelerate==0.12.0  # Compatible with older PyTorch
+      - huggingface-hub==0.8.1  # Stable version in 2022
+      - ninja==1.10.2  # Commonly used in ML in 2022
+      - xatlas==0.0.7  # Older version
+      - imageio==2.19.3  # 2022 version
+      - matplotlib==3.5.3  # Last version of 2022
+      - pyrallis==0.3.1  # Older version
+      - loguru==0.6.0  # Stable in 2022
+      - tqdm==4.64.0  # 2022 version
+      - numpy<2
