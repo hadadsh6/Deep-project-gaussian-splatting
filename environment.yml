@@ -23,3 +23,4 @@ dependencies:
       - loguru==0.6.0  # Stable in 2022
       - tqdm==4.64.0  # 2022 version
       - numpy<2
+      - imageio-ffmpeg
