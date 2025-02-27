@@ -154,6 +154,50 @@ class StableDiffusion(nn.Module):
 
         return 0 # dummy loss value
 
+    def train_step_nfsd(self, text_embeddings, inputs, guidance_scale=7.5):
+        # interp to 512x512 to be fed into vae.
+
+        # _t = time.time()
+        if not self.latent_mode:
+        # latents = F.interpolate(latents, (64, 64), mode='bilinear', align_corners=False)
+            pred_rgb_512 = F.interpolate(inputs, (512, 512), mode='bilinear', align_corners=False)
+            latents = self.encode_imgs(pred_rgb_512)
+        else:
+            latents = inputs
+        # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
+
+        # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
+        t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device)
+
+        with torch.no_grad():
+            latents_noisy = latents # No noise addition in NFSD
+
+            # pred noise
+            latent_model_input = torch.cat([latents_noisy] * 2)
+            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+
+            if t.item() < 200:
+                delta_d = noise_pred_uncond
+            else:
+                text_embeddings_neg = self.get_negative_prompt_embeddings() # negative text prompt
+                noise_pred_neg = self.unet(latents_noisy, t, encoder_hidden_states=text_embeddings_neg).sample # prediction conditioned on negative prompt
+                delta_d = noise_pred_uncond - noise_pred_neg
+
+            delta_c = noise_pred_text - noise_pred_uncond
+
+        noise_pred = delta_d + guidance_scale * delta_c
+
+        # w(t), alpha_t * sigma_t^2
+        # w = (1 - self.alphas[t])
+        w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
+        grad = w * noise_pred
+
+        # Apply gradient descent
+        latents.backward(gradient=grad, retain_graph=True)
+
+        return 0 # dummy loss value
+
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5, latents=None):
 
         if latents is None:
