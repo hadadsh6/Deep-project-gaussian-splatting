@@ -49,6 +49,7 @@ class StableDiffusion(nn.Module):
         # 4. Create a scheduler for inference
         self.scheduler = PNDMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=self.num_train_timesteps)
         self.alphas = self.scheduler.alphas_cumprod.to(self.device) # for convenience
+        self.neg_embedding = self.get_negative_prompt_embeddings()
 
         if concept_name is not None:
             self.load_concept(concept_name)
@@ -154,7 +155,7 @@ class StableDiffusion(nn.Module):
 
         return 0 # dummy loss value
 
-    def train_step_nfsd(self, text_embeddings, inputs, guidance_scale=7.5):
+    def train_step_nfsd(self, text_embeddings, inputs, guidance_scale=100):
         # interp to 512x512 to be fed into vae.
 
         # _t = time.time()
@@ -170,7 +171,8 @@ class StableDiffusion(nn.Module):
         t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device)
 
         with torch.no_grad():
-            latents_noisy = latents # No noise addition in NFSD
+            noise = torch.randn_like(latents)
+            latents_noisy = self.scheduler.add_noise(latents, noise, t)
 
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
@@ -180,8 +182,7 @@ class StableDiffusion(nn.Module):
             if t.item() < 200:
                 delta_d = noise_pred_uncond
             else:
-                text_embeddings_neg = self.get_negative_prompt_embeddings() # negative text prompt
-                noise_pred_neg = self.unet(latents_noisy, t, encoder_hidden_states=text_embeddings_neg).sample # prediction conditioned on negative prompt
+                noise_pred_neg = self.unet(latents_noisy, t, encoder_hidden_states=self.neg_embedding).sample # prediction conditioned on negative prompt
                 delta_d = noise_pred_uncond - noise_pred_neg
 
             delta_c = noise_pred_text - noise_pred_uncond
@@ -263,6 +264,11 @@ class StableDiffusion(nn.Module):
         imgs = (imgs * 255).round().astype('uint8')
 
         return imgs
+
+    def get_negative_prompt_embeddings(self):
+        negative_prompt =  "unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy"
+        neg_embeding = self.get_text_embeds(negative_prompt)
+        return neg_embeding
 
 
 if __name__ == '__main__':
