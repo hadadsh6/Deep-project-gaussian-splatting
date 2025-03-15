@@ -49,6 +49,7 @@ class StableDiffusion(nn.Module):
         # 4. Create a scheduler for inference
         self.scheduler = PNDMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=self.num_train_timesteps)
         self.alphas = self.scheduler.alphas_cumprod.to(self.device) # for convenience
+        self.neg_embedding = self.get_negative_prompt_embeddings()
 
         if concept_name is not None:
             self.load_concept(concept_name)
@@ -154,6 +155,50 @@ class StableDiffusion(nn.Module):
 
         return 0 # dummy loss value
 
+    def train_step_nfsd(self, text_embeddings, inputs, guidance_scale=100):
+        # interp to 512x512 to be fed into vae.
+
+        # _t = time.time()
+        if not self.latent_mode:
+        # latents = F.interpolate(latents, (64, 64), mode='bilinear', align_corners=False)
+            pred_rgb_512 = F.interpolate(inputs, (512, 512), mode='bilinear', align_corners=False)
+            latents = self.encode_imgs(pred_rgb_512)
+        else:
+            latents = inputs
+        # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
+
+        # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
+        t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device)
+
+        with torch.no_grad():
+            noise = torch.randn_like(latents)
+            latents_noisy = self.scheduler.add_noise(latents, noise, t)
+
+            # pred noise
+            latent_model_input = torch.cat([latents_noisy] * 2)
+            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+
+            if t.item() < 200:
+                delta_d = noise_pred_uncond
+            else:
+                noise_pred_neg = self.unet(latents_noisy, t, encoder_hidden_states=self.neg_embedding).sample # prediction conditioned on negative prompt
+                delta_d = noise_pred_uncond - noise_pred_neg
+
+            delta_c = noise_pred_text - noise_pred_uncond
+
+        noise_pred = delta_d + guidance_scale * delta_c
+
+        # w(t), alpha_t * sigma_t^2
+        # w = (1 - self.alphas[t])
+        w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
+        grad = w * noise_pred
+
+        # Apply gradient descent
+        latents.backward(gradient=grad, retain_graph=True)
+
+        return 0 # dummy loss value
+
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5, latents=None):
 
         if latents is None:
@@ -219,6 +264,11 @@ class StableDiffusion(nn.Module):
         imgs = (imgs * 255).round().astype('uint8')
 
         return imgs
+
+    def get_negative_prompt_embeddings(self):
+        negative_prompt =  "unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy"
+        neg_embeding = self.get_text_embeds(negative_prompt)
+        return neg_embeding
 
 
 if __name__ == '__main__':

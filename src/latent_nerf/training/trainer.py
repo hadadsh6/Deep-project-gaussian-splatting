@@ -229,7 +229,7 @@ class Trainer:
             text_z = self.text_z
 
         # Guidance loss
-        loss_guidance = self.diffusion.train_step(text_z, pred_rgb)
+        loss_guidance = self.diffusion.train_step_nfsd(text_z, pred_rgb)
         loss = loss_guidance
 
         # Sparsity loss
